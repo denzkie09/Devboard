@@ -14,8 +14,10 @@ export default function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="flex h-screen w-56 flex-col border-r border-neutral-200 p-4">
-      <span className="mb-6 text-lg font-semibold">DevBoard</span>
+    <aside className="flex h-screen w-56 flex-col border-r border-border-color bg-surface p-4">
+      <span className="mb-6 text-lg font-semibold text-foreground">
+        DevBoard
+      </span>
       <nav className="flex flex-col gap-1">
         {navItems.map((item) => {
           const isActive = pathname === item.href;
@@ -25,8 +27,8 @@ export default function Sidebar() {
               href={item.href}
               className={
                 isActive
-                  ? "rounded-md px-3 py-2 text-sm bg-neutral-100 font-medium text-black"
-                  : "rounded-md px-3 py-2 text-sm text-neutral-500 hover:bg-neutral-50"
+                  ? "rounded-md px-3 py-2 text-sm bg-accent font-medium text-accent-foreground"
+                  : "rounded-md px-3 py-2 text-sm text-foreground-muted hover:bg-background hover:text-foreground"
               }
             >
               {item.label}
