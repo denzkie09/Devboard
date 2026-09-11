@@ -14,6 +14,7 @@ DevBoard follows a simple three-layer structure:
 ```
 app/                    → Routes (Next.js App Router)
   ├─ page.tsx             Landing page
+  ├─ manifest.ts           PWA web app manifest
   ├─ login/, signup/       Auth pages (outside the dashboard layout)
   ├─ dashboard/
   │   ├─ layout.tsx        Shared sidebar + shell + command palette
@@ -24,9 +25,10 @@ app/                    → Routes (Next.js App Router)
   │   ├─ repositories/       Placeholder (future GitHub OAuth feature)
   │   └─ settings/           Personal info, appearance, logout
   └─ components/
-      ├─ Sidebar.tsx         Nav, user footer, ⌘K hint
-      ├─ CommandPalette.tsx  Global Cmd/Ctrl+K command menu
-      └─ ThemeInitializer.tsx Applies the saved accent color on load
+      ├─ Sidebar.tsx              Nav, user footer, ⌘K hint
+      ├─ CommandPalette.tsx       Global Cmd/Ctrl+K command menu
+      ├─ ThemeInitializer.tsx     Applies the saved accent color on load
+      └─ ServiceWorkerRegister.tsx Registers the PWA service worker
 
 lib/
   ├─ supabase/client.ts     Browser Supabase client
@@ -34,6 +36,10 @@ lib/
   ├─ projects.ts             Project data-access functions
   ├─ tasks.ts                Task data-access functions
   └─ theme.ts                Accent color presets + persistence
+
+public/
+  ├─ sw.js                  Service worker (network-first caching)
+  └─ icons/                 Generated app icons (192, 512, maskable)
 
 proxy.ts                  Next.js 16 middleware entry point
 ```
@@ -118,6 +124,36 @@ Moving a task, creating it, editing it, or deleting it all update React state **
 
 Each project's board lives at `app/dashboard/projects/[id]/page.tsx` — the `[id]` folder is Next.js's syntax for a dynamic route segment. `useParams<{ id: string }>()` reads the project ID from the URL, which is then used to fetch that project's name and its tasks.
 
+### A build-breaking gotcha: `useSearchParams` requires a Suspense boundary
+
+When the command palette's "New project" action was added (navigating to `/dashboard/projects?new=true`), the projects page started reading the URL with `useSearchParams()`. This worked fine in local dev but **broke the production build entirely**:
+
+```
+Error occurred prerendering page "/dashboard/projects"
+Export encountered an error on /dashboard/projects/page: /dashboard/projects, exiting the build.
+```
+
+The cause: Next.js tries to statically prerender pages during `next build` wherever possible. `useSearchParams()` makes a page's output depend on the URL at request time, which is fundamentally incompatible with static prerendering unless the component reading it is wrapped in `<Suspense>` — without that boundary, Next.js doesn't know how to produce a static shell and fails the build outright rather than silently guessing.
+
+**Fix:** split the page into two components — an inner one that calls `useSearchParams()`, and the actual default-exported page component, which does nothing but wrap the inner one in `<Suspense>`:
+
+```tsx
+export default function ProjectsPage() {
+  return (
+    <Suspense fallback={null}>
+      <ProjectsPageContent />
+    </Suspense>
+  );
+}
+
+function ProjectsPageContent() {
+  const searchParams = useSearchParams();
+  // ...rest of the page
+}
+```
+
+This is a very common trap: `useSearchParams()` works fine in `npm run dev` (no static prerendering happens there), so the bug only surfaces at build/deploy time — worth testing `npm run build` locally before pushing any change that touches URL params, rather than relying on Vercel's build to catch it.
+
 ---
 
 ## 5. Design System
@@ -162,7 +198,57 @@ A global, keyboard-driven command menu — the feature intended to make DevBoard
 
 ---
 
-## 7. Notable Bugs Fixed Along the Way
+## 7. Progressive Web App (Installable on Desktop & Mobile)
+
+DevBoard is installable as a standalone app on Windows, macOS, Android, and iOS, without maintaining a separate native codebase. This section explains every moving part and why each decision was made.
+
+### Why a PWA, and why first
+
+Three real options exist for making a web app feel native: a **PWA** (near-zero code change, works everywhere immediately), **Tauri** (a genuine native desktop binary, wrapping the existing web app in a lightweight Rust shell), and **Capacitor** (a genuine native mobile app, publishable to app stores, also wrapping the existing web app). The PWA was built first because it required no new build tooling, no changes to existing application code, and covers both desktop and mobile in a single pass — Tauri and Capacitor remain available as later additions that wrap this same app without any of this work being wasted.
+
+### The manifest (`app/manifest.ts`)
+
+Next.js 16 treats `app/manifest.ts` as a special file convention: it's automatically compiled and served at `/manifest.webmanifest`, with Next.js injecting the correct `<link rel="manifest">` tag into `<head>` — no manual HTML required.
+
+Key fields and the reasoning behind each:
+
+- **`start_url: "/dashboard"`** — deliberately not `"/"`. Someone launching the *installed app* almost certainly wants the app itself, not the marketing landing page. Since `/dashboard` is already auth-protected by existing middleware, an unauthenticated user launching the installed icon is automatically redirected to `/login` — no new logic needed to handle this case.
+- **`display: "standalone"`** — the single setting responsible for the app opening in its own chromeless window instead of a browser tab. This is what makes it *feel* like a real app rather than a bookmarked website.
+- **Three icon entries** — a 192px and 512px icon for general use, plus a *third*, separate 512px icon marked `purpose: "maskable"`. Android's launcher applies its own shape mask (circle, squircle, rounded square depending on the device) to app icons. A maskable icon needs its important content kept within a safe zone near the center, with the background color filling all the way to the edges — otherwise the OS's mask can clip meaningful parts of the artwork. This is why the maskable icon is a *separate generated file*, not a reused copy of the regular icon: the regular icon has rounded corners baked in with transparent corners, which would look broken if Android's mask were applied on top.
+
+### The icons
+
+Generated programmatically (Python + Pillow) rather than exported from a design tool, using the exact brand color (`#f2b705`) and a `</>` glyph matching the Sidebar's logo mark. This guarantees pixel-perfect brand consistency, and makes future changes (e.g. an accent color change) a one-line script edit rather than a re-export step.
+
+### The service worker (`public/sw.js`)
+
+A service worker is technically what makes a web app *qualify* as an installable PWA in Chrome/Edge's eyes, separate from the manifest. DevBoard's implementation uses a **network-first** caching strategy, which was a deliberate choice over the more commonly tutorialized "cache-first" approach:
+
+```js
+self.addEventListener("fetch", (event) => {
+  if (event.request.method !== "GET") return;
+  event.respondWith(
+    fetch(event.request).catch(() => caches.match(event.request))
+  );
+});
+```
+
+**Why network-first, not cache-first:** DevBoard is a data-driven app backed by Supabase — projects and tasks change constantly. A cache-first strategy (serve cached content immediately, refresh in the background) would risk showing stale task data on launch, which is actively misleading for a productivity tool. Network-first means the app always tries to fetch live data first, and only falls back to a cached response if there's no network at all — preserving offline resilience (no blank browser error page) without ever showing outdated information when a connection is available.
+
+The service worker also handles its own cache lifecycle: on `install`, it pre-caches a minimal "app shell"; on `activate`, it deletes any previously cached versions that don't match the current `CACHE_NAME`, preventing stale caches from accumulating across deployments.
+
+### Wiring it into the root layout
+
+Two additions to `app/layout.tsx`:
+
+- **`export const viewport: Viewport = { themeColor: "#12141a" }`** — colors the browser's own UI chrome (and the Android status bar) to match the app's dark background. In recent Next.js versions, `themeColor` moved out of the `metadata` export into a dedicated `viewport` export.
+- **`appleWebApp: { capable: true, ... }` inside `metadata`** — iOS Safari has historically ignored parts of the standard web manifest spec and uses its own proprietary meta tags instead. Without this, "Add to Home Screen" on iPhone would open a plain Safari tab instead of a standalone app window.
+
+**Why service worker registration lives in its own tiny client component (`ServiceWorkerRegister.tsx`)** rather than inline in the layout: `navigator.serviceWorker` only exists in the browser, never during server rendering. Since `layout.tsx` renders on the server, referencing browser-only APIs directly there would break SSR. Isolating browser-only logic into a `"use client"` component with a `useEffect` (which only ever fires after mount, in the browser) is the same pattern already used for `ThemeInitializer` — a small, reusable convention for "this needs to run client-side only, and needs no UI."
+
+---
+
+## 8. Notable Bugs Fixed Along the Way
 
 Documented here because the fixes are more instructive than the bugs themselves:
 
@@ -175,20 +261,23 @@ Documented here because the fixes are more instructive than the bugs themselves:
 | `/dashboard/projects` 404'd despite the file existing | File was named `projects_page.tsx` instead of the Next.js–required `page.tsx` | Renamed the file |
 | Dev server blocked static assets, login silently did nothing | Testing via a network IP (`192.168.1.41`) instead of `localhost`, hitting Next.js 16's dev-origin restrictions | Used `localhost` instead |
 | Hydration mismatch warning after a file edit | Stale `.next` build cache serving old HTML against new client code | Cleared `.next` and hard-refreshed |
+| Production build failed after adding the command palette's "New project" action | `useSearchParams()` used without a `<Suspense>` boundary, incompatible with static prerendering | Split the page into an inner component and a `<Suspense>`-wrapped default export |
 
 ---
 
-## 8. Deferred (v2) Features
+## 9. Deferred (v2) Features
 
 These were scoped out of the MVP deliberately, to ship a working core first:
 
 - **GitHub OAuth** — would make the Repositories page functional (linking real repos to projects), and could enable commit-message-based task linking (e.g. a commit containing `fixes DB-12` auto-marks that task done) as a further extension.
 - **Analytics** — activity/progress tracking across projects.
 - **AI assistant** — in-app help or automation.
+- **Tauri desktop build** — a genuine native installer (.exe/.dmg), wrapping the existing app in a lightweight Rust shell, layered on top of the PWA work already done.
+- **Capacitor mobile build** — a genuine installable Android/iOS app, publishable to app stores, also wrapping the existing app.
 
 ---
 
-## 9. Local Development
+## 10. Local Development
 
 ```bash
 npm install
@@ -203,3 +292,5 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```
 
 Run the SQL in `supabase/migrations/` (or the schema in Section 3) against your Supabase project before first use.
+
+**Before pushing any change touching routing or URL params**, run `npm run build` locally first — some errors (like the `useSearchParams` Suspense issue above) only surface during production builds, not in `next dev`.
