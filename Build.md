@@ -3,7 +3,7 @@
 A developer productivity dashboard built as a portfolio project, covering authentication, project/task management, and a Kanban-style board.
 
 **Live app:** https://devboard-tawny.vercel.app
-**Stack:** Next.js 16 (App Router, Turbopack) · TypeScript · Tailwind CSS v4 · Supabase (Auth + Postgres)
+**Stack:** Next.js 16 (App Router, Turbopack) · TypeScript · Tailwind CSS v4 · Supabase (Auth + Postgres) · cmdk
 
 ---
 
@@ -16,20 +16,24 @@ app/                    → Routes (Next.js App Router)
   ├─ page.tsx             Landing page
   ├─ login/, signup/       Auth pages (outside the dashboard layout)
   ├─ dashboard/
-  │   ├─ layout.tsx        Shared sidebar + shell
-  │   ├─ page.tsx           Dashboard home
+  │   ├─ layout.tsx        Shared sidebar + shell + command palette
+  │   ├─ page.tsx           Dashboard home (stats, recent projects)
   │   ├─ projects/
   │   │   ├─ page.tsx        Project list (create/edit/delete)
   │   │   └─ [id]/page.tsx    Kanban board for one project
   │   ├─ repositories/       Placeholder (future GitHub OAuth feature)
-  │   └─ settings/           Account info + logout
-  └─ components/            Shared UI (Sidebar)
+  │   └─ settings/           Personal info, appearance, logout
+  └─ components/
+      ├─ Sidebar.tsx         Nav, user footer, ⌘K hint
+      ├─ CommandPalette.tsx  Global Cmd/Ctrl+K command menu
+      └─ ThemeInitializer.tsx Applies the saved accent color on load
 
 lib/
   ├─ supabase/client.ts     Browser Supabase client
   ├─ supabase/middleware.ts  Session refresh + route protection
   ├─ projects.ts             Project data-access functions
-  └─ tasks.ts                Task data-access functions
+  ├─ tasks.ts                Task data-access functions
+  └─ theme.ts                Accent color presets + persistence
 
 proxy.ts                  Next.js 16 middleware entry point
 ```
@@ -134,9 +138,31 @@ Tailwind v4 uses CSS-based theming instead of a `tailwind.config.js` color palet
 
 This gives a "dark developer console" identity (deep charcoal-navy background, warm amber accent reserved for primary actions) instead of default Tailwind grays, and means a future palette change only requires editing these variables in one place rather than hunting down hardcoded `bg-neutral-100` classes across every file.
 
+### User-selectable accent color
+
+`lib/theme.ts` defines five accent presets (Amber, Teal, Violet, Rose, Sky). Choosing one in Settings calls `applyAccent()`, which overwrites the `--accent` / `--accent-foreground` CSS variables directly on `document.documentElement` and saves the choice to `localStorage`. Because every component styles itself with `bg-accent` / `text-accent` rather than a hardcoded color, the entire app re-colors instantly with no reload. `ThemeInitializer` (mounted once in the root layout) re-applies the saved choice on every page load, since CSS variables set via JS don't persist across a fresh document load on their own.
+
 ---
 
-## 6. Notable Bugs Fixed Along the Way
+## 6. Command Palette (⌘K)
+
+A global, keyboard-driven command menu — the feature intended to make DevBoard feel distinct from a generic Trello/Slack-style clone, rather than adding a chat or notifications feature that would just be a shallower version of what those tools already do well.
+
+**Why this feature, specifically:** the goal was something that showcases frontend/UX craft without depending on external services (unlike, say, a GitHub webhook integration), is fully demoable in a few seconds for anyone reviewing the project, and borrows a pattern developers already recognize and trust from tools like Linear and Raycast.
+
+**How it's built:**
+
+- Uses [`cmdk`](https://cmdk.paco.me/), an unstyled, accessible command menu primitive — it provides fuzzy filtering, keyboard navigation (arrows, enter, escape), and a modal wrapper (`Command.Dialog`) for free, styled here with the same dark theme tokens as the rest of the app.
+- A single `keydown` listener on `document` (in `CommandPalette.tsx`) opens the palette on `Cmd+K` / `Ctrl+K` from anywhere in the dashboard.
+- **Three command groups:**
+  - *Navigate* — jump to Dashboard, Projects, Repositories, or Settings
+  - *Actions* — "New project" (navigates to the projects page with `?new=true`, which the page reads on load to auto-open the create form) and "Log out"
+  - *Projects* — fetched live via `getProjects()` each time the palette opens, letting you type a project's name to jump straight to its board
+- A small "Quick search ⌘K" badge in the Sidebar footer exists purely for discoverability — without it, a feature like this is easy for a first-time visitor to miss entirely.
+
+---
+
+## 7. Notable Bugs Fixed Along the Way
 
 Documented here because the fixes are more instructive than the bugs themselves:
 
@@ -152,17 +178,17 @@ Documented here because the fixes are more instructive than the bugs themselves:
 
 ---
 
-## 7. Deferred (v2) Features
+## 8. Deferred (v2) Features
 
 These were scoped out of the MVP deliberately, to ship a working core first:
 
-- **GitHub OAuth** — would make the Repositories page functional (linking real repos to projects).
+- **GitHub OAuth** — would make the Repositories page functional (linking real repos to projects), and could enable commit-message-based task linking (e.g. a commit containing `fixes DB-12` auto-marks that task done) as a further extension.
 - **Analytics** — activity/progress tracking across projects.
 - **AI assistant** — in-app help or automation.
 
 ---
 
-## 8. Local Development
+## 9. Local Development
 
 ```bash
 npm install

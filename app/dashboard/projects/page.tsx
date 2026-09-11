@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   createProject,
   deleteProject,
@@ -10,6 +11,7 @@ import {
 } from "../../../lib/Projects";
 
 export default function ProjectsPage() {
+  const searchParams = useSearchParams();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -32,6 +34,12 @@ export default function ProjectsPage() {
   useEffect(() => {
     loadProjects();
   }, []);
+
+  useEffect(() => {
+    if (searchParams.get("new") === "true") {
+      setShowForm(true);
+    }
+  }, [searchParams]);
 
   async function loadProjects() {
     setLoading(true);

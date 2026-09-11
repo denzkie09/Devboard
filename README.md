@@ -14,6 +14,8 @@ For a deep dive into the architecture, key technical decisions, and bugs solved 
 - **Projects** — create, rename, and delete projects
 - **Kanban board** — each project gets its own board with To Do / In Progress / Done columns
 - **Tasks** — create, edit, delete, and move tasks between columns
+- **Command palette (⌘K)** — a keyboard-driven command menu for jumping to any page, searching projects by name, and creating a new project without touching the mouse
+- **Customizable appearance** — pick an accent color from Settings; it applies instantly and persists across sessions
 - **Row-level security** — every user can only ever see and modify their own data, enforced at the database level
 
 ## Tech Stack
@@ -24,6 +26,8 @@ For a deep dive into the architecture, key technical decisions, and bugs solved 
 | Language | TypeScript |
 | Styling | [Tailwind CSS v4](https://tailwindcss.com) |
 | Backend | [Supabase](https://supabase.com) (Postgres + Auth) |
+| Command menu | [cmdk](https://cmdk.paco.me/) |
+| Icons | [Lucide](https://lucide.dev) |
 | Hosting | [Vercel](https://vercel.com) |
 
 ## Getting Started
@@ -45,7 +49,7 @@ NEXT_PUBLIC_SUPABASE_URL=your-project-url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-Run the schema SQL from [BUILD_DOCUMENTATION.md](./BUILD_DOCUMENTATION.md#2-database-schema--row-level-security) in your Supabase project's SQL editor to create the `projects` and `tasks` tables with the correct policies.
+Run the schema SQL from [BUILD_DOCUMENTATION.md](./BUILD_DOCUMENTATION.md#3-database-schema--row-level-security) in your Supabase project's SQL editor to create the `projects` and `tasks` tables with the correct policies.
 
 **3. Run the dev server**
 
@@ -53,11 +57,11 @@ Run the schema SQL from [BUILD_DOCUMENTATION.md](./BUILD_DOCUMENTATION.md#2-data
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000). Press **⌘K** (or **Ctrl+K**) anywhere in the dashboard to try the command palette.
 
 ## Roadmap
 
-- [ ] GitHub OAuth (to power a real Repositories view)
+- [ ] GitHub OAuth (to power a real Repositories view, and enable commit-based task linking)
 - [ ] Basic analytics across projects
 - [ ] In-app AI assistant
 

@@ -66,6 +66,12 @@ export default function Sidebar() {
       </nav>
 
       <div className="border-t border-border-color p-4">
+        <div className="mb-3 flex items-center gap-2 rounded-md border border-border-color bg-background px-2.5 py-1.5">
+          <span className="text-xs text-foreground-muted">Quick search</span>
+          <kbd className="ml-auto rounded border border-border-color bg-surface px-1.5 py-0.5 text-[10px] font-medium text-foreground-muted">
+            &#8984;K
+          </kbd>
+        </div>
         <div className="flex items-center gap-2">
           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-foreground">
             {email ? email[0].toUpperCase() : "?"}
