@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import ThemeInitializer from "./components/ThemeInitializer";
+import ServiceWorkerRegister from "./components/ServiceWorkerRegister";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -15,7 +16,18 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "DevBoard",
-  description: "A developer productivity dashboard for managing projects, tasks, and GitHub activity in one place.",
+  description:
+    "A developer productivity dashboard for managing projects, tasks, and GitHub activity in one place.",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "DevBoard",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#12141a",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -26,6 +38,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col">
         <ThemeInitializer />
+        <ServiceWorkerRegister />
         {children}
       </body>
     </html>
