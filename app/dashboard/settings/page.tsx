@@ -1,17 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check } from "lucide-react";
+import { Check, GraduationCap, User as UserIcon } from "lucide-react";
 import { createClient } from "../../../lib/supabase/client";
+import { getProfile, type Profile } from "../../../lib/profiles";
 import { ACCENT_PRESETS, applyAccent, getSavedAccentId } from "../../../lib/theme";
 
 export default function SettingsPage() {
   const [email, setEmail] = useState<string | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState("");
 
-  const [selectedAccent, setSelectedAccent] = useState(getSavedAccentId());
+  const [selectedAccent, setSelectedAccent] = useState(ACCENT_PRESETS[0].id);
 
   const [displayName, setDisplayName] = useState("");
   const [savingName, setSavingName] = useState(false);
@@ -20,6 +22,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     loadUser();
+    setSelectedAccent(getSavedAccentId());
   }, []);
 
   async function loadUser() {
@@ -32,6 +35,14 @@ export default function SettingsPage() {
 
     setEmail(user?.email ?? null);
     setDisplayName((user?.user_metadata?.display_name as string) ?? "");
+
+    try {
+      const profileData = await getProfile();
+      setProfile(profileData);
+    } catch {
+      setProfile(null);
+    }
+
     setLoading(false);
   }
 
@@ -91,6 +102,22 @@ export default function SettingsPage() {
           <p className="mb-4 text-xs text-foreground-muted">
             Signed in as {loading ? "..." : email ?? "Unknown"}
           </p>
+
+          {!loading && profile && (
+            <div className="mb-4 flex items-center gap-2 rounded-md border border-border-color bg-background px-3 py-2">
+              {profile.role === "teacher" ? (
+                <GraduationCap size={16} className="text-accent" />
+              ) : (
+                <UserIcon size={16} className="text-accent" />
+              )}
+              <span className="text-sm text-foreground">
+                {profile.role === "teacher" ? "Teacher" : "Student"} account
+              </span>
+              <span className="ml-auto text-xs text-foreground-muted">
+                Can't be changed
+              </span>
+            </div>
+          )}
 
           <form onSubmit={handleSaveName}>
             <label className="mb-1 block text-sm text-foreground-muted">

@@ -6,6 +6,7 @@ import { createClient } from "../../lib/supabase/client";
 export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [role, setRole] = useState<"student" | "teacher">("student");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -19,6 +20,9 @@ export default function SignupPage() {
     const { error } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        data: { role },
+      },
     });
 
     setLoading(false);
@@ -74,8 +78,40 @@ export default function SignupPage() {
           onChange={(e) => setPassword(e.target.value)}
           required
           minLength={6}
-          className="mb-4 w-full rounded-md border border-border-color bg-background px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
+          className="mb-3 w-full rounded-md border border-border-color bg-background px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
         />
+
+        <label className="mb-1 block text-sm text-foreground-muted">
+          I am a...
+        </label>
+        <div className="mb-4 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => setRole("student")}
+            className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+              role === "student"
+                ? "border-accent bg-accent text-accent-foreground"
+                : "border-border-color bg-background text-foreground-muted hover:text-foreground"
+            }`}
+          >
+            Student
+          </button>
+          <button
+            type="button"
+            onClick={() => setRole("teacher")}
+            className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+              role === "teacher"
+                ? "border-accent bg-accent text-accent-foreground"
+                : "border-border-color bg-background text-foreground-muted hover:text-foreground"
+            }`}
+          >
+            Teacher
+          </button>
+        </div>
+        <p className="mb-4 -mt-2 text-xs text-foreground-muted">
+          This can't be changed later, so pick the one that matches how
+          you'll use DevBoard.
+        </p>
 
         {error && <p className="mb-3 text-sm text-danger">{error}</p>}
 
