@@ -13,8 +13,12 @@ export type AssignmentStatus = {
   student_id: string;
   display_name: string | null;
   email: string;
-  status: "not_started" | "submitted";
+  status: "not_started" | "submitted" | "graded";
+  submission_id: string | null;
+  content: string | null;
   submitted_at: string | null;
+  grade: string | null;
+  feedback: string | null;
 };
 
 // Fetch the current student's own submission for an assignment, if any.
@@ -73,6 +77,25 @@ export async function submitWork(
     )
     .select()
     .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
+// Fetch the grade/feedback for the current student's own submission, if any.
+export async function getMyGrade(
+  submissionId: string
+): Promise<{ grade: string; feedback: string | null } | null> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase
+    .from("assignment_grades")
+    .select("grade, feedback")
+    .eq("submission_id", submissionId)
+    .maybeSingle();
 
   if (error) {
     throw new Error(error.message);
