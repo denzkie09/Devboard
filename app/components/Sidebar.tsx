@@ -9,12 +9,14 @@ import {
   GitBranch,
   Settings,
   Code2,
+  School,
 } from "lucide-react";
 import { createClient } from "../../lib/supabase/client";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Projects", href: "/dashboard/projects", icon: FolderKanban },
+  { label: "Classroom", href: "/dashboard/classroom", icon: School },
   { label: "Repositories", href: "/dashboard/repositories", icon: GitBranch },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
