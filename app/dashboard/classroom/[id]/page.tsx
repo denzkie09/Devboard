@@ -262,9 +262,12 @@ export default function ClassDetailPage() {
                   className="rounded-lg border border-border-color bg-surface p-4"
                 >
                   <div className="flex items-start justify-between">
-                    <p className="font-medium text-foreground">
+                    <a
+                      href={`/dashboard/classroom/${classId}/assignments/${assignment.id}`}
+                      className="font-medium text-foreground hover:text-accent hover:underline"
+                    >
                       {assignment.title}
-                    </p>
+                    </a>
                     {isTeacher && (
                       <button
                         onClick={() => handleDeleteAssignment(assignment.id)}
