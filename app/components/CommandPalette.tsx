@@ -10,6 +10,7 @@ import {
   Settings,
   LogOut,
   Plus,
+  School,
 } from "lucide-react";
 import { getProjects, type Project } from "../../lib/Projects";
 import { createClient } from "../../lib/supabase/client";
@@ -91,6 +92,15 @@ export default function CommandPalette() {
           >
             <FolderKanban size={16} />
             Go to Projects
+          </Command.Item>
+          <Command.Item
+            onSelect={() =>
+              runCommand(() => router.push("/dashboard/classroom"))
+            }
+            className="flex items-center gap-2 rounded-md px-2 py-2 text-sm text-foreground data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground"
+          >
+            <School size={16} />
+            Go to Classroom
           </Command.Item>
           <Command.Item
             onSelect={() =>

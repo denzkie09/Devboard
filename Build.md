@@ -1,6 +1,6 @@
 # DevBoard — Build Documentation
 
-A developer productivity dashboard built as a portfolio project, covering authentication, project/task management, and a Kanban-style board.
+A developer productivity dashboard built as a portfolio project, covering authentication, project/task management, a Kanban-style board, and a multi-role Classroom feature for teachers and students.
 
 **Live app:** https://devboard-tawny.vercel.app
 **Stack:** Next.js 16 (App Router, Turbopack) · TypeScript · Tailwind CSS v4 · Supabase (Auth + Postgres) · cmdk
@@ -9,288 +9,202 @@ A developer productivity dashboard built as a portfolio project, covering authen
 
 ## 1. Architecture Overview
 
-DevBoard follows a simple three-layer structure:
-
 ```
-app/                    → Routes (Next.js App Router)
-  ├─ page.tsx             Landing page
-  ├─ manifest.ts           PWA web app manifest
-  ├─ login/, signup/       Auth pages (outside the dashboard layout)
+app/
+  ├─ page.tsx               Landing page
+  ├─ manifest.ts             PWA web app manifest
+  ├─ login/, signup/         Auth pages (signup includes role selection)
   ├─ dashboard/
-  │   ├─ layout.tsx        Shared sidebar + shell + command palette
-  │   ├─ page.tsx           Dashboard home (stats, recent projects)
-  │   ├─ projects/
-  │   │   ├─ page.tsx        Project list (create/edit/delete)
-  │   │   └─ [id]/page.tsx    Kanban board for one project
-  │   ├─ repositories/       Placeholder (future GitHub OAuth feature)
-  │   └─ settings/           Personal info, appearance, logout
+  │   ├─ layout.tsx          Shared sidebar + shell + command palette
+  │   ├─ page.tsx             Dashboard home (stats, recent projects)
+  │   ├─ projects/            Personal project/task CRUD + Kanban board
+  │   ├─ classroom/
+  │   │   ├─ page.tsx          Class list (role-based: create vs. join)
+  │   │   └─ [id]/page.tsx      Class detail: roster (teacher), assignments
+  │   ├─ assignments/
+  │   │   └─ [assignmentId]/page.tsx   Submission (student) / grading (teacher)
+  │   ├─ repositories/        Placeholder (future GitHub OAuth feature)
+  │   └─ settings/            Personal info, role display, appearance, logout
   └─ components/
-      ├─ Sidebar.tsx              Nav, user footer, ⌘K hint
-      ├─ CommandPalette.tsx       Global Cmd/Ctrl+K command menu
-      ├─ ThemeInitializer.tsx     Applies the saved accent color on load
-      └─ ServiceWorkerRegister.tsx Registers the PWA service worker
+      ├─ Sidebar.tsx, CommandPalette.tsx, ThemeInitializer.tsx, ServiceWorkerRegister.tsx
 
 lib/
-  ├─ supabase/client.ts     Browser Supabase client
-  ├─ supabase/middleware.ts  Session refresh + route protection
-  ├─ projects.ts             Project data-access functions
-  ├─ tasks.ts                Task data-access functions
-  └─ theme.ts                Accent color presets + persistence
+  ├─ supabase/                Browser client + middleware (session/route protection)
+  ├─ projects.ts, tasks.ts     Personal project/task data access
+  ├─ profiles.ts               Read-only role/display-name access
+  ├─ classes.ts                 Class create/join/roster
+  ├─ assignments.ts             Assignment CRUD (teacher) / read (both)
+  ├─ submissions.ts             Student submission + status-with-names (teacher)
+  ├─ grades.ts                  Grade/feedback upsert (teacher)
+  └─ theme.ts                   Accent color presets + persistence
 
-public/
-  ├─ sw.js                  Service worker (network-first caching)
-  └─ icons/                 Generated app icons (192, 512, maskable)
-
-proxy.ts                  Next.js 16 middleware entry point
+public/                     PWA icons + service worker
+proxy.ts                    Next.js 16 middleware entry point
 ```
 
-The core principle: **UI components never talk to Supabase directly.** Every database operation goes through a typed function in `lib/projects.ts` or `lib/tasks.ts`. This keeps components focused on rendering and state, and means there's one place to fix a bug or change a query — not one per component that happens to need that data.
+The core principle carried through the whole project: **UI components never talk to Supabase directly for anything beyond auth state.** Every database read/write goes through a typed function in `lib/`, keeping access-control logic out of components and in one place per concern.
 
 ---
 
 ## 2. Authentication
 
-### How it works
+Supabase Auth (`@supabase/ssr`, cookie-based sessions) handles sign-up, login, and route protection via middleware. Two bugs worth remembering from this part of the build:
 
-Supabase Auth handles sign-up, login, and session storage. The `@supabase/ssr` package is used instead of the plain `supabase-js` client because it stores the session in **cookies** rather than `localStorage` — cookies can be read by Next.js middleware on the server, which is what makes route protection possible.
-
-- `lib/supabase/client.ts` — creates a browser-side Supabase client via `createBrowserClient`.
-- `lib/supabase/middleware.ts` — runs on every request, refreshes the session, and redirects unauthenticated users away from `/dashboard/*`.
-- `proxy.ts` — Next.js 16 renamed `middleware.ts` to `proxy.ts` as the file that wires this into the request pipeline.
-
-### A bug worth understanding: the login redirect race condition
-
-Early on, login would succeed (no error, valid credentials) but the app stayed on `/login` with no visible error. The cause: after `supabase.auth.signInWithPassword()` resolves, the session cookie is set client-side. The original code then called `router.push("/dashboard")`, which is a **soft, client-side navigation**. In some cases, the request Next.js sends for that navigation doesn't reliably reflect the just-set cookie state by the time middleware evaluates it — so middleware treats the user as still unauthenticated and silently redirects back to `/login`.
-
-**Fix:** replace `router.push()` with a hard navigation:
-
-```ts
-router.refresh();
-window.location.href = "/dashboard";
-```
-
-`window.location.href` forces a full page reload, which guarantees the browser sends the fresh cookie with the new request. This is a common gotcha in Next.js + Supabase SSR setups and worth remembering for any auth flow that redirects immediately after a client-side sign-in.
-
-### Logout follows the same pattern
-
-`supabase.auth.signOut()` followed by `window.location.href = "/login"` — for the same reason: a hard redirect ensures the now-cleared session is respected on the very next request.
+- **Login redirect race condition:** `router.push()` after sign-in is a soft client-side navigation that can race against the just-set session cookie, causing middleware to redirect back to `/login` with no visible error. Fixed with a hard navigation: `router.refresh(); window.location.href = "/dashboard";`. The same pattern applies to logout.
+- **`useSearchParams()` requires a `<Suspense>` boundary** or the production build fails outright during static prerendering — this only surfaces in `npm run build`, never in `npm run dev`, so it's worth building locally before every push that touches URL params.
 
 ---
 
-## 3. Database Schema & Row Level Security
-
-Two tables: `projects` and `tasks`, both with Row Level Security (RLS) enabled.
+## 3. Database Schema & Row Level Security (Personal Projects)
 
 ```sql
 projects (id, user_id, name, description, created_at, updated_at)
 tasks    (id, project_id, user_id, title, description, status, position, created_at, updated_at)
 ```
 
-**Key design decisions:**
-
-- **`user_id` is duplicated on `tasks`**, even though a task's project already implies an owner. This avoids a join in every RLS policy check (`auth.uid() = user_id` is a single-column comparison instead of a subquery into `projects`), which keeps queries simpler and faster.
-- **RLS policies handle all access control** — there is no manual `.eq("user_id", ...)` filtering in application code for `projects`. The policies (`select`/`insert`/`update`/`delete`, each checking `auth.uid() = user_id`) mean a user physically cannot query another user's rows, even if the client code had a bug. This pushes the security boundary into the database rather than trusting every call site to remember the filter.
-- **`status` uses a check constraint** (`todo` / `in_progress` / `done`) rather than a free-text column, preventing typos from creating a "phantom" column that would never render in the UI.
-- **`position` exists for future ordering** within a column (e.g. if drag-and-drop or manual reordering is added later) — new tasks are appended with `position = count of existing tasks in that column`.
-- **Cascade deletes**: deleting a project removes its tasks automatically (`on delete cascade`), so there's no orphaned data to clean up manually.
+Both tables use RLS exclusively for access control (no manual `.eq("user_id", ...)` filtering in application code). `user_id` is duplicated on `tasks` even though it's implied by the parent project, specifically to keep RLS policy checks to a single-column comparison rather than a subquery — a pattern that becomes especially relevant later in the Classroom schema, where lookups chain much deeper.
 
 ---
 
 ## 4. The Kanban Board
 
-### Status changes instead of drag-and-drop
-
-Drag-and-drop (via `@dnd-kit/core`) was built and worked, but was deliberately replaced with explicit action buttons ("Start", "Mark done", "Reopen", "Back to To Do"). Reasoning:
-
-- Drag-and-drop adds real complexity: pointer event handling, drop-zone detection, and conflicts with click events inside cards (editing/deleting a task while a drag listener is attached to the same element requires manually stopping event propagation).
-- A `STATUS_ACTIONS` lookup table maps each status to its valid next moves, so the UI only ever shows actions that make sense for a task's current state — this is arguably *clearer* to a user than inferring drag targets.
-
-```ts
-const STATUS_ACTIONS: Record<TaskStatus, { target: TaskStatus; label: string }[]> = {
-  todo: [{ target: "in_progress", label: "Start" }],
-  in_progress: [
-    { target: "todo", label: "Back to To Do" },
-    { target: "done", label: "Mark done" },
-  ],
-  done: [{ target: "in_progress", label: "Reopen" }],
-};
-```
-
-### Optimistic updates with rollback
-
-Moving a task, creating it, editing it, or deleting it all update React state **immediately**, before the Supabase call resolves. If the call fails, the change is rolled back and an error is shown. This makes the UI feel instant rather than waiting on a network round-trip for every interaction — a pattern worth using anywhere a write is very likely to succeed but you don't want to block on confirming it.
-
-### Dynamic routing
-
-Each project's board lives at `app/dashboard/projects/[id]/page.tsx` — the `[id]` folder is Next.js's syntax for a dynamic route segment. `useParams<{ id: string }>()` reads the project ID from the URL, which is then used to fetch that project's name and its tasks.
-
-### A build-breaking gotcha: `useSearchParams` requires a Suspense boundary
-
-When the command palette's "New project" action was added (navigating to `/dashboard/projects?new=true`), the projects page started reading the URL with `useSearchParams()`. This worked fine in local dev but **broke the production build entirely**:
-
-```
-Error occurred prerendering page "/dashboard/projects"
-Export encountered an error on /dashboard/projects/page: /dashboard/projects, exiting the build.
-```
-
-The cause: Next.js tries to statically prerender pages during `next build` wherever possible. `useSearchParams()` makes a page's output depend on the URL at request time, which is fundamentally incompatible with static prerendering unless the component reading it is wrapped in `<Suspense>` — without that boundary, Next.js doesn't know how to produce a static shell and fails the build outright rather than silently guessing.
-
-**Fix:** split the page into two components — an inner one that calls `useSearchParams()`, and the actual default-exported page component, which does nothing but wrap the inner one in `<Suspense>`:
-
-```tsx
-export default function ProjectsPage() {
-  return (
-    <Suspense fallback={null}>
-      <ProjectsPageContent />
-    </Suspense>
-  );
-}
-
-function ProjectsPageContent() {
-  const searchParams = useSearchParams();
-  // ...rest of the page
-}
-```
-
-This is a very common trap: `useSearchParams()` works fine in `npm run dev` (no static prerendering happens there), so the bug only surfaces at build/deploy time — worth testing `npm run build` locally before pushing any change that touches URL params, rather than relying on Vercel's build to catch it.
+Status changes ("Start" / "Mark done" / "Reopen") replaced drag-and-drop after drag-and-drop was built and found to add real complexity (pointer event handling, conflicts between drag listeners and click handlers) for limited benefit over explicit buttons. All task mutations use optimistic UI updates with rollback on failure.
 
 ---
 
 ## 5. Design System
 
-Tailwind v4 uses CSS-based theming instead of a `tailwind.config.js` color palette. Tokens are defined once in `app/globals.css` as CSS variables, then registered with `@theme inline` so they become real Tailwind utility classes (`bg-surface`, `text-foreground-muted`, `bg-accent`, etc.) usable anywhere in the app:
+Tailwind v4's CSS-based theming (`@theme inline` in `globals.css`) defines the app's dark "developer console" palette as CSS variables, making every component's color a token (`bg-surface`, `text-accent`, etc.) rather than a hardcoded value. A user-selectable accent color (`lib/theme.ts`, 5 presets) is applied by directly overwriting those variables via JS and persisting the choice to `localStorage`, re-applied on each load by `ThemeInitializer`.
 
-```css
-:root {
-  --background: #12141a;
-  --surface: #1b1e27;
-  --border-color: #2a2e3a;
-  --foreground: #edeff3;
-  --foreground-muted: #9aa1b2;
-  --accent: #f2b705;
-  --danger: #f2555a;
-}
-```
-
-This gives a "dark developer console" identity (deep charcoal-navy background, warm amber accent reserved for primary actions) instead of default Tailwind grays, and means a future palette change only requires editing these variables in one place rather than hunting down hardcoded `bg-neutral-100` classes across every file.
-
-### User-selectable accent color
-
-`lib/theme.ts` defines five accent presets (Amber, Teal, Violet, Rose, Sky). Choosing one in Settings calls `applyAccent()`, which overwrites the `--accent` / `--accent-foreground` CSS variables directly on `document.documentElement` and saves the choice to `localStorage`. Because every component styles itself with `bg-accent` / `text-accent` rather than a hardcoded color, the entire app re-colors instantly with no reload. `ThemeInitializer` (mounted once in the root layout) re-applies the saved choice on every page load, since CSS variables set via JS don't persist across a fresh document load on their own.
+**A hydration lesson from this system:** reading `localStorage` *during a component's initial render* (e.g. `useState(getSavedAccentId())`) causes a server/client mismatch, since `localStorage` doesn't exist during server rendering — the server always falls back to a default, while the client's first render already has the real value. Fix: initialize state to a fixed default on both sides, then read the real value inside `useEffect`, which only ever runs after hydration completes.
 
 ---
 
 ## 6. Command Palette (⌘K)
 
-A global, keyboard-driven command menu — the feature intended to make DevBoard feel distinct from a generic Trello/Slack-style clone, rather than adding a chat or notifications feature that would just be a shallower version of what those tools already do well.
-
-**Why this feature, specifically:** the goal was something that showcases frontend/UX craft without depending on external services (unlike, say, a GitHub webhook integration), is fully demoable in a few seconds for anyone reviewing the project, and borrows a pattern developers already recognize and trust from tools like Linear and Raycast.
-
-**How it's built:**
-
-- Uses [`cmdk`](https://cmdk.paco.me/), an unstyled, accessible command menu primitive — it provides fuzzy filtering, keyboard navigation (arrows, enter, escape), and a modal wrapper (`Command.Dialog`) for free, styled here with the same dark theme tokens as the rest of the app.
-- A single `keydown` listener on `document` (in `CommandPalette.tsx`) opens the palette on `Cmd+K` / `Ctrl+K` from anywhere in the dashboard.
-- **Three command groups:**
-  - *Navigate* — jump to Dashboard, Projects, Repositories, or Settings
-  - *Actions* — "New project" (navigates to the projects page with `?new=true`, which the page reads on load to auto-open the create form) and "Log out"
-  - *Projects* — fetched live via `getProjects()` each time the palette opens, letting you type a project's name to jump straight to its board
-- A small "Quick search ⌘K" badge in the Sidebar footer exists purely for discoverability — without it, a feature like this is easy for a first-time visitor to miss entirely.
+Built with [`cmdk`](https://cmdk.paco.me/) as DevBoard's differentiating feature — chosen over ideas like GitHub webhook integration specifically because it's self-contained (no external services), fully demoable in seconds, and borrows a pattern (Linear/Raycast-style command menus) developers already trust. Covers navigation, quick actions ("New project," now "Go to Classroom"), and live project search — all via three `cmdk` command groups.
 
 ---
 
-## 7. Progressive Web App (Installable on Desktop & Mobile)
+## 7. Progressive Web App
 
-DevBoard is installable as a standalone app on Windows, macOS, Android, and iOS, without maintaining a separate native codebase. This section explains every moving part and why each decision was made.
+DevBoard installs as a standalone app on desktop and mobile via a web manifest (`app/manifest.ts`), a generated icon set (including a separate maskable variant for Android's icon-shape masking), and a **network-first** service worker — deliberately not cache-first, since a data-driven app risks showing stale tasks/assignments if cached content were served before a live fetch. This was built before considering Tauri (desktop) or Capacitor (mobile) specifically because it requires zero new tooling and covers both platforms in one pass; those remain available later as wrappers around the same app.
 
-### Why a PWA, and why first
+---
 
-Three real options exist for making a web app feel native: a **PWA** (near-zero code change, works everywhere immediately), **Tauri** (a genuine native desktop binary, wrapping the existing web app in a lightweight Rust shell), and **Capacitor** (a genuine native mobile app, publishable to app stores, also wrapping the existing web app). The PWA was built first because it required no new build tooling, no changes to existing application code, and covers both desktop and mobile in a single pass — Tauri and Capacitor remain available as later additions that wrap this same app without any of this work being wasted.
+## 8. Classroom: Roles, Classes, Assignments & Grading
 
-### The manifest (`app/manifest.ts`)
+This is the largest and most architecturally involved feature in DevBoard, built to explore multi-user access control patterns beyond a single-owner CRUD app. It adds two roles — teacher and student — with teachers creating classes and assignments, students joining classes and submitting work, and teachers grading submissions.
 
-Next.js 16 treats `app/manifest.ts` as a special file convention: it's automatically compiled and served at `/manifest.webmanifest`, with Next.js injecting the correct `<link rel="manifest">` tag into `<head>` — no manual HTML required.
+### 8.1 Why roles can't be self-editable
 
-Key fields and the reasoning behind each:
+The foundational constraint: a user's role **cannot** live anywhere the user can edit it themselves. Supabase lets a signed-in user freely rewrite their own `user_metadata` via `supabase.auth.updateUser()` — if role lived there, any student could open dev tools and call that method to promote themselves to teacher.
 
-- **`start_url: "/dashboard"`** — deliberately not `"/"`. Someone launching the *installed app* almost certainly wants the app itself, not the marketing landing page. Since `/dashboard` is already auth-protected by existing middleware, an unauthenticated user launching the installed icon is automatically redirected to `/login` — no new logic needed to handle this case.
-- **`display: "standalone"`** — the single setting responsible for the app opening in its own chromeless window instead of a browser tab. This is what makes it *feel* like a real app rather than a bookmarked website.
-- **Three icon entries** — a 192px and 512px icon for general use, plus a *third*, separate 512px icon marked `purpose: "maskable"`. Android's launcher applies its own shape mask (circle, squircle, rounded square depending on the device) to app icons. A maskable icon needs its important content kept within a safe zone near the center, with the background color filling all the way to the edges — otherwise the OS's mask can clip meaningful parts of the artwork. This is why the maskable icon is a *separate generated file*, not a reused copy of the regular icon: the regular icon has rounded corners baked in with transparent corners, which would look broken if Android's mask were applied on top.
+**Solution:** a `profiles` table with no `insert` or `update` RLS policy for regular users at all. The only way a row is created is a database trigger (`handle_new_user()`, `security definer`) firing on `auth.users` insert — i.e., only at the exact moment of signup, reading the role from signup metadata. A second trigger (`prevent_role_change()`) forcibly resets `role` to its prior value on every update, as defense-in-depth even if a future policy change accidentally allowed updates. The role choice is made once, at signup, and is permanent — the signup UI says so explicitly rather than letting someone discover it later.
 
-### The icons
+### 8.2 Classes and the join-code chicken-and-egg problem
 
-Generated programmatically (Python + Pillow) rather than exported from a design tool, using the exact brand color (`#f2b705`) and a `</>` glyph matching the Sidebar's logo mark. This guarantees pixel-perfect brand consistency, and makes future changes (e.g. an accent color change) a one-line script edit rather than a re-export step.
-
-### The service worker (`public/sw.js`)
-
-A service worker is technically what makes a web app *qualify* as an installable PWA in Chrome/Edge's eyes, separate from the manifest. DevBoard's implementation uses a **network-first** caching strategy, which was a deliberate choice over the more commonly tutorialized "cache-first" approach:
-
-```js
-self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET") return;
-  event.respondWith(
-    fetch(event.request).catch(() => caches.match(event.request))
-  );
-});
+```sql
+classes       (id, teacher_id, name, join_code, created_at)
+class_members (id, class_id, student_id, joined_at)
 ```
 
-**Why network-first, not cache-first:** DevBoard is a data-driven app backed by Supabase — projects and tasks change constantly. A cache-first strategy (serve cached content immediately, refresh in the background) would risk showing stale task data on launch, which is actively misleading for a productivity tool. Network-first means the app always tries to fetch live data first, and only falls back to a cached response if there's no network at all — preserving offline resilience (no blank browser error page) without ever showing outdated information when a connection is available.
+A student needs to look up a class by its join code *before* becoming a member — but the natural RLS policy ("students can see classes they belong to") can't apply yet, since they don't belong yet. Exposing the whole `classes` table for lookup-by-code would leak every class's data to every user.
 
-The service worker also handles its own cache lifecycle: on `install`, it pre-caches a minimal "app shell"; on `activate`, it deletes any previously cached versions that don't match the current `CACHE_NAME`, preventing stale caches from accumulating across deployments.
+**Solution:** `join_class(code)`, a `security definer` Postgres function. It runs with elevated privileges specifically to do one narrow thing — look up a class by code and insert a `class_members` row for the calling user (`auth.uid()`) — without ever exposing `classes` directly to non-members. This is a recurring pattern throughout the Classroom feature: whenever RLS creates an unsolvable ordering problem, a narrowly-scoped `security definer` function bridges it, rather than weakening the RLS policy itself.
 
-### Wiring it into the root layout
+### 8.3 The RLS infinite recursion bug
 
-Two additions to `app/layout.tsx`:
+Early on, loading a class failed with `infinite recursion detected in policy for relation "classes"`. The cause: the "students can view classes they belong to" policy on `classes` queried `class_members`; the "teachers can view rosters" policy on `class_members` queried `classes`. Each policy's evaluation triggered the other's, looping forever.
 
-- **`export const viewport: Viewport = { themeColor: "#12141a" }`** — colors the browser's own UI chrome (and the Android status bar) to match the app's dark background. In recent Next.js versions, `themeColor` moved out of the `metadata` export into a dedicated `viewport` export.
-- **`appleWebApp: { capable: true, ... }` inside `metadata`** — iOS Safari has historically ignored parts of the standard web manifest spec and uses its own proprietary meta tags instead. Without this, "Add to Home Screen" on iPhone would open a plain Safari tab instead of a standalone app window.
+**Fix:** extract each cross-table check into its own `security definer`, `stable` SQL function:
 
-**Why service worker registration lives in its own tiny client component (`ServiceWorkerRegister.tsx`)** rather than inline in the layout: `navigator.serviceWorker` only exists in the browser, never during server rendering. Since `layout.tsx` renders on the server, referencing browser-only APIs directly there would break SSR. Isolating browser-only logic into a `"use client"` component with a `useEffect` (which only ever fires after mount, in the browser) is the same pattern already used for `ThemeInitializer` — a small, reusable convention for "this needs to run client-side only, and needs no UI."
+```sql
+create function is_class_member(target_class_id uuid) returns boolean
+  security definer as $$
+    select exists (select 1 from class_members
+      where class_id = target_class_id and student_id = auth.uid());
+  $$ language sql;
+
+create function is_class_teacher(target_class_id uuid) returns boolean
+  security definer as $$
+    select exists (select 1 from classes
+      where id = target_class_id and teacher_id = auth.uid());
+  $$ language sql;
+```
+
+Because these run as `security definer`, RLS is not re-evaluated *inside* them — breaking the cycle. Every later policy in the Classroom schema (assignments, submissions, grades) builds on these two functions rather than writing fresh cross-table subqueries, both for consistency and to avoid reintroducing the same recursion as the schema grows.
+
+**General lesson:** any time two tables' RLS policies need to reference each other, at least one side needs to go through a `security definer` function rather than a direct policy subquery.
+
+### 8.4 Assignments, submissions, and grades: three tables, not one
+
+```sql
+assignments             (id, class_id, teacher_id, title, description, due_date, ...)
+assignment_submissions  (id, assignment_id, student_id, content, submitted_at, ...)
+assignment_grades       (id, submission_id, grade, feedback, graded_by, graded_at, ...)
+```
+
+Submissions and grades are deliberately split into separate tables rather than adding `grade`/`feedback` columns directly to `assignment_submissions`. Reasoning: Postgres RLS operates per-row, not per-column. If a submission's content and its grade lived in the same row, the student's "I can update my own submission" policy would need to somehow exclude just the grade/feedback columns from that permission — awkward and error-prone to express in RLS. Splitting into two tables means each gets a simple, single-purpose policy: students write to `assignment_submissions`, teachers write to `assignment_grades`, with no column-level carve-outs needed anywhere.
+
+The cost of this normalization: grading policies can't check `is_class_teacher()` directly, since a grade only knows its `submission_id` — not which class it belongs to. Each grading policy has to walk the chain (grade → submission → assignment → `is_class_teacher(assignment.class_id)`) via an `exists (...)` subquery. This is more verbose than earlier policies, but avoids a worse alternative: denormalizing `class_id` directly onto the grades table, which would risk that copy drifting out of sync with the submission's actual class.
+
+### 8.5 Exposing names safely: security-definer views with authorization gates
+
+A recurring problem: teachers need to see student names/emails (for rosters and grading), but `profiles` RLS only lets a user read their own row — a teacher has no legitimate way to read another user's profile through normal RLS. Broadening `profiles`' select policy to "anyone can read anyone's profile" would leak every user's data to every other user, which is far too permissive just to solve this one case.
+
+**Solution:** two `security definer` functions — `get_class_roster_with_names(class_id)` and `get_assignment_status(assignment_id)` — that join `class_members` / `assignment_submissions` against `profiles` and `auth.users`, but **only after an explicit authorization check inside the function body**:
+
+```sql
+if not public.is_class_teacher(target_class_id) then
+  raise exception 'Not authorized to view this roster';
+end if;
+```
+
+This check is the actual security boundary, not a formality — because the function runs with elevated privileges, it technically *could* return any student's data to any caller if this check were missing. Every `security definer` function in this schema follows the same shape: do the minimum privileged lookup needed, gate it with an explicit ownership check, and return only what's necessary (never, say, a full `profiles` row when only a name and email are needed).
+
+`get_assignment_status` evolved across two phases: it started (Phase 4) returning just submission status per student, then was extended (Phase 5, via `create or replace function`) to also return submission content and grade/feedback in the same call — avoiding N+1 round-trips per student when a teacher opens an assignment to grade it.
+
+### 8.6 Route structure: URLs don't need to mirror data hierarchy
+
+The assignment detail page was initially planned as a deeply nested route (`/dashboard/classroom/[id]/assignments/[assignmentId]`), mirroring the data's parent-child relationship. This was reconsidered: the page never actually used the class ID from the URL for anything — it already fetches the assignment row directly by ID, and that row includes `class_id` for the one place it's needed (the "back to class" link).
+
+**Decision:** flatten the route to `/dashboard/assignments/[assignmentId]`, a peer of `/dashboard/classroom` and `/dashboard/projects` rather than nested inside either. General takeaway: a URL's structure should reflect what's actually needed to load and link the page, not necessarily the full conceptual hierarchy of the underlying data — nesting a route "because that's how the data relates" is a cost (deeper folders, longer relative imports) that isn't always paying for anything.
 
 ---
 
-## 8. Notable Bugs Fixed Along the Way
-
-Documented here because the fixes are more instructive than the bugs themselves:
+## 9. Notable Bugs Fixed Along the Way
 
 | Issue | Cause | Fix |
 |---|---|---|
-| Login form had no password field | Missing `<input>` in JSX | Added the field |
-| Login button didn't work | `e.preventDefault` referenced but never called (missing `()`) | Called it properly |
+| Login form had no password field / button didn't work | Missing `<input>`; `e.preventDefault` never called | Added the field; called `preventDefault()` |
 | Stuck on `/login` after correct credentials | Soft navigation raced with cookie propagation | Hard redirect via `window.location.href` |
-| Sidebar links 404'd | Pages referenced in nav were never actually created | Built the missing pages, or added honest "Coming soon" placeholders |
-| `/dashboard/projects` 404'd despite the file existing | File was named `projects_page.tsx` instead of the Next.js–required `page.tsx` | Renamed the file |
-| Dev server blocked static assets, login silently did nothing | Testing via a network IP (`192.168.1.41`) instead of `localhost`, hitting Next.js 16's dev-origin restrictions | Used `localhost` instead |
-| Hydration mismatch warning after a file edit | Stale `.next` build cache serving old HTML against new client code | Cleared `.next` and hard-refreshed |
-| Production build failed after adding the command palette's "New project" action | `useSearchParams()` used without a `<Suspense>` boundary, incompatible with static prerendering | Split the page into an inner component and a `<Suspense>`-wrapped default export |
+| `/dashboard/projects` 404'd despite the file existing | File named `projects_page.tsx` instead of `page.tsx` | Renamed the file |
+| Production build failed after adding `?new=true` handling | `useSearchParams()` without a `<Suspense>` boundary | Split into an inner component + `<Suspense>`-wrapped default export |
+| Hydration mismatch on the accent-color picker | `localStorage` read during initial render, differing between server/client | Moved the read into `useEffect` |
+| `infinite recursion detected in policy for relation "classes"` | Two RLS policies on different tables each queried the other | Extracted `is_class_member()` / `is_class_teacher()` as `security definer` functions |
+| SQL migration failed: `relation "class_members" does not exist` | A policy on `classes` referenced `class_members` before that table was created | Reordered the migration script |
+| `lib/submissions.ts` broke with 20+ cascading TypeScript errors | A find-and-replace edit accidentally deleted a function's declaration line, desyncing the parser for everything after it | Restored the missing declaration |
 
 ---
 
-## 9. Deferred (v2) Features
+## 10. Deferred (v2) Features
 
-These were scoped out of the MVP deliberately, to ship a working core first:
-
-- **GitHub OAuth** — would make the Repositories page functional (linking real repos to projects), and could enable commit-message-based task linking (e.g. a commit containing `fixes DB-12` auto-marks that task done) as a further extension.
-- **Analytics** — activity/progress tracking across projects.
+- **GitHub OAuth** — would power a real Repositories view and could enable commit-based task linking.
+- **Analytics** — activity/progress tracking across projects and classes.
 - **AI assistant** — in-app help or automation.
-- **Tauri desktop build** — a genuine native installer (.exe/.dmg), wrapping the existing app in a lightweight Rust shell, layered on top of the PWA work already done.
-- **Capacitor mobile build** — a genuine installable Android/iOS app, publishable to app stores, also wrapping the existing app.
+- **Tauri desktop build / Capacitor mobile build** — genuine native wrappers around the existing PWA-ready app.
+- **Numeric grading & gradebook views** — grades are currently free-text (so "95," "A," or "Pass" all work); a future version could add structured numeric grading with class-wide averages.
 
 ---
 
-## 10. Local Development
+## 11. Local Development
 
 ```bash
 npm install
 npm run dev
 ```
 
-Requires a `.env.local` with:
+Requires `.env.local` with `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Run all SQL migrations in order (personal projects/tasks schema, then Classroom Phases 1–5) against your Supabase project's SQL editor before first use.
 
-```
-NEXT_PUBLIC_SUPABASE_URL=your-project-url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-```
-
-Run the SQL in `supabase/migrations/` (or the schema in Section 3) against your Supabase project before first use.
-
-**Before pushing any change touching routing or URL params**, run `npm run build` locally first — some errors (like the `useSearchParams` Suspense issue above) only surface during production builds, not in `next dev`.
+**Before pushing any change touching routing or URL params**, run `npm run build` locally — some errors only surface during production builds, not `next dev`.

@@ -1,22 +1,25 @@
 # DevBoard
 
-A developer productivity dashboard for organizing projects and tracking tasks on a Kanban-style board — built as a portfolio project to explore full-stack development with Next.js and Supabase.
+A developer productivity dashboard for organizing projects and tracking tasks on a Kanban-style board — with a multi-role Classroom feature for teachers and students. Built as a portfolio project exploring full-stack development and access-control design with Next.js and Supabase.
 
 **Live app:** [devboard-tawny.vercel.app](https://devboard-tawny.vercel.app)
 
-For a deep dive into the architecture, key technical decisions, and bugs solved along the way, see [BUILD_DOCUMENTATION.md](./BUILD_DOCUMENTATION.md).
+For a deep dive into the architecture, key technical decisions, and bugs solved along the way — including the Classroom feature's role security and RLS design — see [BUILD_DOCUMENTATION.md](./BUILD_DOCUMENTATION.md).
 
 ---
 
 ## Features
 
-- **Authentication** — sign up, log in, and log out with secure, cookie-based sessions
-- **Projects** — create, rename, and delete projects
+- **Authentication** — sign up (as a teacher or student), log in, and log out with secure, cookie-based sessions
+- **Projects** — create, rename, and delete personal projects
 - **Kanban board** — each project gets its own board with To Do / In Progress / Done columns
 - **Tasks** — create, edit, delete, and move tasks between columns
+- **Classroom** — teachers create classes and share a join code; students join and see assignments
+- **Assignments & grading** — teachers post assignments, students submit work, teachers review submissions and leave a grade + feedback
 - **Command palette (⌘K)** — a keyboard-driven command menu for jumping to any page, searching projects by name, and creating a new project without touching the mouse
 - **Customizable appearance** — pick an accent color from Settings; it applies instantly and persists across sessions
-- **Row-level security** — every user can only ever see and modify their own data, enforced at the database level
+- **Installable app** — works as a Progressive Web App on desktop and mobile
+- **Row-level security everywhere** — every table's access rules are enforced at the database level, not just in application code
 
 ## Tech Stack
 
@@ -25,7 +28,7 @@ For a deep dive into the architecture, key technical decisions, and bugs solved 
 | Framework | [Next.js 16](https://nextjs.org) (App Router, Turbopack) |
 | Language | TypeScript |
 | Styling | [Tailwind CSS v4](https://tailwindcss.com) |
-| Backend | [Supabase](https://supabase.com) (Postgres + Auth) |
+| Backend | [Supabase](https://supabase.com) (Postgres + Auth + RLS) |
 | Command menu | [cmdk](https://cmdk.paco.me/) |
 | Icons | [Lucide](https://lucide.dev) |
 | Hosting | [Vercel](https://vercel.com) |
@@ -49,7 +52,7 @@ NEXT_PUBLIC_SUPABASE_URL=your-project-url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-Run the schema SQL from [BUILD_DOCUMENTATION.md](./BUILD_DOCUMENTATION.md#3-database-schema--row-level-security) in your Supabase project's SQL editor to create the `projects` and `tasks` tables with the correct policies.
+Run all the SQL migrations from [BUILD_DOCUMENTATION.md](./BUILD_DOCUMENTATION.md) in your Supabase project's SQL editor, in order: the personal projects/tasks schema, then the Classroom feature's five phases (profiles, classes, assignments, submissions, grades).
 
 **3. Run the dev server**
 
@@ -62,8 +65,10 @@ Open [http://localhost:3000](http://localhost:3000). Press **⌘K** (or **Ctrl+K
 ## Roadmap
 
 - [ ] GitHub OAuth (to power a real Repositories view, and enable commit-based task linking)
-- [ ] Basic analytics across projects
+- [ ] Basic analytics across projects and classes
 - [ ] In-app AI assistant
+- [ ] Native desktop (Tauri) and mobile (Capacitor) builds
+- [ ] Structured numeric grading with gradebook views
 
 ## Author
 
