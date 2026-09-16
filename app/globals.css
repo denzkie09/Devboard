@@ -9,6 +9,8 @@
   --accent: #f2b705;
   --accent-foreground: #12141a;
   --danger: #f2555a;
+  --success: #34d399;
+  --success-foreground: #0b1f17;
 }
 
 @theme inline {
@@ -20,6 +22,8 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-danger: var(--danger);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
